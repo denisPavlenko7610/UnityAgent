@@ -16,6 +16,11 @@ public sealed class RiderCodeIntelligence : ICodeIntelligence
 		_ide = ide;
 	}
 
+	public Task<string> GetOpenFilesAsync(ProjectWorkspace workspace, CancellationToken cancellationToken)
+	{
+		return _ide.CallToolAsync(workspace, "get_all_open_file_paths", null, cancellationToken);
+	}
+
 	public Task<string> SearchSymbolAsync(ProjectWorkspace workspace, string query, CancellationToken cancellationToken)
 	{
 		var arguments = new Dictionary<string, object?>

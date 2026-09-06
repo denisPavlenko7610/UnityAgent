@@ -12,6 +12,20 @@ public static class AgentPolicy
         Prefer small, focused changes.
         Never invent Unity or C# APIs.
         Never modify unrelated code.
+        
+        Never guess the current file, class, symbol, or selected code.
+        
+        If project or editor tools cannot provide the required context, say that the context is unavailable instead of
+        inventing likely project symbols.
+        
+        Do not perform speculative symbol searches when the user has not named a symbol.
+        The runtime may provide IDE context before the user request.
+        Treat IDE-provided code and file paths as authoritative.
+        
+        Never infer an unrelated project domain from an ambiguous request.
+        
+        If required editor context is explicitly reported as ambiguous or unavailable,
+        do not compensate with speculative symbol searches.
         """;
 
 	private const string Explain = """
@@ -30,6 +44,13 @@ public static class AgentPolicy
         Use call analysis when understanding callers or callees is important.
 
         Never modify project files.
+        
+        For requests to explain the current code or file:
+        1. Get the editor context.
+        2. Read the active file or the smallest relevant range.
+        3. Explain only after inspecting the actual code.
+        
+        Do not answer from assumptions when the requested code is available through project tools.
         """;
 
 	private const string Code = """

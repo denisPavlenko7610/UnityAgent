@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using UnityAgent.Core.Agent;
 using UnityAgent.Core.Code;
+using UnityAgent.Core.Context;
 using UnityAgent.Core.Diagnostics;
 using UnityAgent.Core.Ide;
 using UnityAgent.Core.Runtime;
@@ -10,6 +11,7 @@ using UnityAgent.Core.Workspace;
 using UnityAgent.Host.Acp;
 using UnityAgent.Host.Diagnostics;
 using UnityAgent.Host.Hosting;
+using UnityAgent.Infrastructure.Context;
 using UnityAgent.Infrastructure.Models;
 using UnityAgent.Infrastructure.Rider;
 using UnityAgent.Infrastructure.Workspace;
@@ -66,6 +68,7 @@ if (acpMode)
 else
 	builder.Services.AddSingleton<IAgentTrace, ConsoleAgentTrace>();
 
+builder.Services.AddSingleton<IContextEngine, ContextEngine>();
 builder.Services.AddSingleton<LmStudioModelResolver>();
 builder.Services.AddSingleton<IIdeBridge, RiderMcpBridge>();
 builder.Services.AddSingleton<ICodeIntelligence, RiderCodeIntelligence>();

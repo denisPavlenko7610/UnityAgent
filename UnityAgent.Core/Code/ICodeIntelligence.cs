@@ -4,10 +4,9 @@ namespace UnityAgent.Core.Code;
 
 public interface ICodeIntelligence
 {
-	Task<string> SearchSymbolAsync(
-		ProjectWorkspace workspace,
-		string query,
-		CancellationToken cancellationToken);
+	Task<string> GetOpenFilesAsync(ProjectWorkspace workspace, CancellationToken cancellationToken);
+
+	Task<string> SearchSymbolAsync(ProjectWorkspace workspace, string query, CancellationToken cancellationToken);
 
 	Task<string> ReadCodeAsync(
 		ProjectWorkspace workspace,
@@ -23,7 +22,5 @@ public interface ICodeIntelligence
 		CancellationToken cancellationToken);
 
 	Task<string> GetFileProblemsAsync(
-		ProjectWorkspace workspace,
-		string filePath,
-		CancellationToken cancellationToken);
+		ProjectWorkspace workspace, string filePath, CancellationToken cancellationToken);
 }
