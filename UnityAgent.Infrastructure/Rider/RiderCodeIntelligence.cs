@@ -21,9 +21,7 @@ public sealed class RiderCodeIntelligence : ICodeIntelligence
 	{
 		var arguments = new Dictionary<string, object?>
 		{
-			["q"] = pattern,
-			["includeExcluded"] = false,
-			["limit"] = 12
+			["q"] = pattern
 		};
 
 		return _ide.CallToolAsync(workspace, "search_file", arguments, cancellationToken);
@@ -34,8 +32,7 @@ public sealed class RiderCodeIntelligence : ICodeIntelligence
 	{
 		var arguments = new Dictionary<string, object?>
 		{
-			["q"] = text,
-			["limit"] = 12
+			["q"] = text
 		};
 
 		return _ide.CallToolAsync(workspace, "search_text", arguments, cancellationToken);

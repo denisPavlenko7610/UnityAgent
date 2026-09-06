@@ -12,6 +12,7 @@ using UnityAgent.Core.Agent;
 using UnityAgent.Core.Code;
 using UnityAgent.Core.Context;
 using UnityAgent.Core.Diagnostics;
+using UnityAgent.Core.Indexing;
 using UnityAgent.Core.Memory;
 using UnityAgent.Core.Runtime;
 using UnityAgent.Core.Workspace;
@@ -29,6 +30,7 @@ public sealed class AgentFrameworkRuntime : IAgentRuntime
     private readonly IAgentTrace _trace;
     private readonly ILoggerFactory _loggerFactory;
 	private readonly ISessionMemory _sessionMemory;
+	private readonly IProjectIndex _projectIndex;
 
     private readonly ConcurrentDictionary<string, ChatClient> _clients = new();
 
@@ -40,7 +42,8 @@ public sealed class AgentFrameworkRuntime : IAgentRuntime
         IContextEngine contextEngine,
         IAgentTrace trace,
         ILoggerFactory loggerFactory,
-		ISessionMemory sessionMemory
+		ISessionMemory sessionMemory,
+		IProjectIndex projectIndex
 	)
     {
         _settings = settings.Value;
@@ -51,6 +54,7 @@ public sealed class AgentFrameworkRuntime : IAgentRuntime
         _trace = trace;
         _loggerFactory = loggerFactory;
 		_sessionMemory = sessionMemory;
+		_projectIndex = projectIndex;
 	}
 
 	public async IAsyncEnumerable<AgentRunEvent> RunAsync(
@@ -60,7 +64,7 @@ public sealed class AgentFrameworkRuntime : IAgentRuntime
 		var context = await _contextEngine.BuildAsync(request, cancellationToken);
 		var modelId = await _modelResolver.GetLoadedModelIdAsync(cancellationToken);
 		var chatClient = _clients.GetOrAdd(modelId, CreateChatClient);
-		var tools = CreateTools(request.Mode, request.Workspace);
+		var tools = CreateTools(request);
 		var runOptions = CreateRunOptions(request.Mode);
 
 		AIAgent agent = chatClient.AsAIAgent(
@@ -87,30 +91,67 @@ public sealed class AgentFrameworkRuntime : IAgentRuntime
 		_sessionMemory.AddExchange(request.SessionId, request.Message, response.ToString());
 	}
 
-    private IList<AITool> CreateTools(AgentMode mode, ProjectWorkspace workspace)
-    {
-        var codeTools = new CodeAgentTools(
-            _code,
-            _trace,
-            workspace,
-            _agentSettings.MaximumToolSteps);
+	private IList<AITool> CreateTools(AgentRequest request)
+	{
+		var budget = new ToolCallBudget(_agentSettings.MaximumToolSteps);
 
-        IList<AITool> readOnlyTools =
-        [
-            AIFunctionFactory.Create(codeTools.SearchSymbolAsync, name: "search_symbol"),
-            AIFunctionFactory.Create(codeTools.ReadCodeAsync, name: "read_code"),
-            AIFunctionFactory.Create(codeTools.AnalyzeCallsAsync, name: "analyze_calls"),
-            AIFunctionFactory.Create(codeTools.GetFileProblemsAsync, name: "get_file_problems")
-        ];
+		var searchTools = new SearchAgentTools(
+			_code,
+			_projectIndex,
+			_trace,
+			request.Workspace,
+			budget);
 
-        return mode switch
-        {
-            AgentMode.Explain => readOnlyTools,
-            AgentMode.Code => readOnlyTools,
-            AgentMode.Debug => readOnlyTools,
-            _ => throw new ArgumentOutOfRangeException(nameof(mode))
-        };
-    }
+		var codeTools = new CodeAgentTools(
+			_code,
+			_trace,
+			request.Workspace,
+			budget);
+
+		var editorTools = new EditorContextAgentTools(
+			_code,
+			request.Workspace,
+			request.Resources);
+
+		IList<AITool> readOnlyTools =
+		[
+			AIFunctionFactory.Create(
+				editorTools.ReadCurrentFileAsync,
+				name: "read_current_file"),
+
+			AIFunctionFactory.Create(
+				searchTools.FindSymbolAsync,
+				name: "find_symbol"),
+
+			AIFunctionFactory.Create(
+				searchTools.FindFileAsync,
+				name: "find_file"),
+
+			AIFunctionFactory.Create(
+				searchTools.FindTextAsync,
+				name: "find_text"),
+
+			AIFunctionFactory.Create(
+				codeTools.ReadCodeAsync,
+				name: "read_code"),
+
+			AIFunctionFactory.Create(
+				codeTools.AnalyzeCallsAsync,
+				name: "analyze_calls"),
+
+			AIFunctionFactory.Create(
+				codeTools.GetFileProblemsAsync,
+				name: "get_file_problems")
+		];
+
+		return request.Mode switch
+		{
+			AgentMode.Explain => readOnlyTools,
+			AgentMode.Code => readOnlyTools,
+			AgentMode.Debug => readOnlyTools,
+			_ => throw new ArgumentOutOfRangeException(nameof(request.Mode))
+		};
+	}
 
     private static ChatClientAgentRunOptions CreateRunOptions(AgentMode mode)
     {

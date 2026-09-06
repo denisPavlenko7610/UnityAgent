@@ -6,6 +6,7 @@ using UnityAgent.Core.Code;
 using UnityAgent.Core.Context;
 using UnityAgent.Core.Diagnostics;
 using UnityAgent.Core.Ide;
+using UnityAgent.Core.Indexing;
 using UnityAgent.Core.Memory;
 using UnityAgent.Core.Runtime;
 using UnityAgent.Core.Workspace;
@@ -13,9 +14,11 @@ using UnityAgent.Host.Acp;
 using UnityAgent.Host.Diagnostics;
 using UnityAgent.Host.Hosting;
 using UnityAgent.Infrastructure.Context;
+using UnityAgent.Infrastructure.Indexing;
 using UnityAgent.Infrastructure.Memory;
 using UnityAgent.Infrastructure.Models;
 using UnityAgent.Infrastructure.Rider;
+using UnityAgent.Infrastructure.Storage;
 using UnityAgent.Infrastructure.Workspace;
 
 var acpMode = args.Any(arg => arg.Equals("--acp", StringComparison.OrdinalIgnoreCase));
@@ -65,11 +68,18 @@ builder.Services
 		"Rider:Endpoint must be a valid URI.")
 	.ValidateOnStart();
 
+builder.Services
+	.AddOptions<StorageSettings>()
+	.Bind(builder.Configuration.GetSection(StorageSettings.SectionName));
+
 if (acpMode)
 	builder.Services.AddSingleton<IAgentTrace, StderrAgentTrace>();
 else
 	builder.Services.AddSingleton<IAgentTrace, ConsoleAgentTrace>();
 
+builder.Services.AddSingleton<ProjectStorage>();
+builder.Services.AddSingleton<ProjectDatabase>();
+builder.Services.AddSingleton<IProjectIndex, SqliteProjectIndex>();
 builder.Services.AddSingleton<IContextEngine, ContextEngine>();
 builder.Services.AddSingleton<LmStudioModelResolver>();
 builder.Services.AddSingleton<IIdeBridge, RiderMcpBridge>();

@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using UnityAgent.Core.Agent;
+using UnityAgent.Core.Indexing;
 using UnityAgent.Core.Runtime;
 using UnityAgent.Core.Workspace;
 
@@ -15,6 +16,7 @@ internal sealed class AcpAgentWorker : BackgroundService
     private readonly IAgentRuntime _agent;
     private readonly AgentSettings _settings;
     private readonly IHostApplicationLifetime _applicationLifetime;
+    private readonly IProjectIndex _projectIndex;
 
     private readonly ConcurrentDictionary<string, AcpSessionState> _sessions = new();
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activePrompts = new();
@@ -25,11 +27,13 @@ internal sealed class AcpAgentWorker : BackgroundService
 	public AcpAgentWorker(
         IAgentRuntime agent,
         IOptions<AgentSettings> settings,
-        IHostApplicationLifetime applicationLifetime)
+        IHostApplicationLifetime applicationLifetime,
+        IProjectIndex projectIndex)
     {
         _agent = agent;
         _settings = settings.Value;
         _applicationLifetime = applicationLifetime;
+        _projectIndex = projectIndex;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -131,19 +135,36 @@ internal sealed class AcpAgentWorker : BackgroundService
 		return SendResultAsync(id, result, cancellationToken);
 	}
 
-    private Task HandleNewSessionAsync(JsonElement id, JsonElement parameters, CancellationToken cancellationToken)
+    private async Task HandleNewSessionAsync(JsonElement id, JsonElement parameters, CancellationToken cancellationToken)
     {
         var cwd = parameters.GetProperty("cwd").GetString();
 
         if (string.IsNullOrWhiteSpace(cwd))
-            return SendErrorAsync(id, _code, "session/new requires cwd.", cancellationToken);
+        {
+            await SendErrorAsync(id, _code, "session/new requires cwd.", cancellationToken);
+            return;
+        }
 
         var rootPath = Path.GetFullPath(cwd);
 
         if (!Directory.Exists(rootPath))
-            return SendErrorAsync(id, _code, $"Workspace does not exist: {rootPath}", cancellationToken);
+        {
+            await SendErrorAsync(id, _code, $"Workspace does not exist: {rootPath}", cancellationToken);
+            return;
+        }
 
         var workspace = new ProjectWorkspace(rootPath, new DirectoryInfo(rootPath).Name);
+
+        try
+        {
+            await _projectIndex.EnsureReadyAsync(workspace, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            await SendErrorAsync(id, -32603, $"Failed to initialize project storage: {exception.Message}", cancellationToken);
+            return;
+        }
+
         var sessionId = Guid.NewGuid().ToString("N");
         var session = new AcpSessionState(workspace, _settings.Mode);
 
@@ -152,6 +173,7 @@ internal sealed class AcpAgentWorker : BackgroundService
         var result = new
         {
             sessionId,
+
             modes = new
             {
                 currentModeId = ToModeId(session.Mode),
@@ -179,7 +201,7 @@ internal sealed class AcpAgentWorker : BackgroundService
             }
         };
 
-        return SendResultAsync(id, result, cancellationToken);
+        await SendResultAsync(id, result, cancellationToken);
     }
 
     private Task HandleSetModeAsync(JsonElement id, JsonElement parameters, CancellationToken cancellationToken)
@@ -206,12 +228,6 @@ internal sealed class AcpAgentWorker : BackgroundService
             return SendErrorAsync(id, _code, "Unknown ACP session.", stoppingToken);
 
 		var prompt = AcpPromptParser.Parse(parameters);
-
-		Console.Error.WriteLine(
-			$"[ACP PROMPT] textLength={prompt.Text.Length}, resources={prompt.Resources.Count}");
-
-		foreach (var resource in prompt.Resources)
-			Console.Error.WriteLine($"[ACP RESOURCE] {resource.Name ?? resource.Uri}");
 
 		if (string.IsNullOrWhiteSpace(prompt.Text) && prompt.Resources.Count == 0)
 			return SendErrorAsync(id, _code, "The prompt contains no supported content.", stoppingToken);
