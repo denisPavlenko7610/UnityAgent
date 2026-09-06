@@ -19,9 +19,10 @@ public sealed class ConfiguredWorkspaceProvider : IWorkspaceProvider
         var rootPath = Path.GetFullPath(configuredPath)
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-        ValidateUnityProject(rootPath);
+		if (!Directory.Exists(rootPath))
+			throw new DirectoryNotFoundException($"Workspace does not exist: {rootPath}");
 
-        var name = new DirectoryInfo(rootPath).Name;
+		var name = new DirectoryInfo(rootPath).Name;
 
         _workspace = new ProjectWorkspace(rootPath, name);
     }
@@ -33,31 +34,4 @@ public sealed class ConfiguredWorkspaceProvider : IWorkspaceProvider
         return ValueTask.FromResult(_workspace);
     }
 
-    private static void ValidateUnityProject(string rootPath)
-    {
-        if (!Directory.Exists(rootPath))
-        {
-            throw new DirectoryNotFoundException($"Workspace does not exist: {rootPath}");
-        }
-
-        var requiredDirectories =
-			new[]
-            {
-                "Assets",
-                "Packages",
-                "ProjectSettings"
-            };
-
-        foreach (var directory in requiredDirectories)
-        {
-            var path = Path.Combine(rootPath, directory);
-
-            if (!Directory.Exists(path))
-            {
-                throw new InvalidOperationException(
-                    $"'{rootPath}' is not a valid Unity project. " +
-                    $"Missing directory: {directory}");
-            }
-        }
-    }
 }

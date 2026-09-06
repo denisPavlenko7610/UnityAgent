@@ -23,6 +23,11 @@ public static class AgentPolicy
         - how data flows through it;
         - how Unity interacts with it;
         - important architectural decisions.
+        Use project tools to inspect code when the answer depends on the current project.
+        Do not ask the user to paste code that can be retrieved with tools.
+        Prefer symbol search over broad text search.
+        Read only the smallest code range needed for the explanation.
+        Use call analysis when understanding callers or callees is important.
 
         Never modify project files.
         """;

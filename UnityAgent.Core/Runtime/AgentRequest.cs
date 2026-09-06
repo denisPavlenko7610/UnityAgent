@@ -1,5 +1,6 @@
 using UnityAgent.Core.Agent;
+using UnityAgent.Core.Workspace;
 
 namespace UnityAgent.Core.Runtime;
 
-public sealed record AgentRequest(string Message, AgentMode Mode, string? SessionId = null);
+public sealed record AgentRequest(string Message, AgentMode Mode, ProjectWorkspace Workspace, string? SessionId = null);
