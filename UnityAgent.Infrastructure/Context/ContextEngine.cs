@@ -1,136 +1,102 @@
-using System.Text.Json;
+using System.Text;
 using UnityAgent.Core.Code;
 using UnityAgent.Core.Context;
+using UnityAgent.Core.Memory;
 using UnityAgent.Core.Runtime;
 
 namespace UnityAgent.Infrastructure.Context;
 
 public sealed class ContextEngine : IContextEngine
 {
-    private const int AutomaticReadLines = 160;
+    private const int MaximumResources = 3;
+    private const int MaximumFileLines = 160;
+
+	private readonly ISessionMemory _sessionMemory;
 
     private readonly ICodeIntelligence _code;
 
-    public ContextEngine(ICodeIntelligence code)
-    {
-        _code = code;
-    }
+    public ContextEngine(ICodeIntelligence code, ISessionMemory sessionMemory)
+	{
+		_code = code;
+		_sessionMemory = sessionMemory;
+	}
 
     public async Task<AgentContext> BuildAsync(AgentRequest request, CancellationToken cancellationToken)
     {
-        if (!NeedsEditorContext(request.Message))
-            return new AgentContext(request.Message);
+		var builder = new StringBuilder();
+		var history = _sessionMemory.GetContext(request.SessionId);
 
-        var rawOpenFiles = await _code.GetOpenFilesAsync(request.Workspace, cancellationToken);
-        var openFiles = TryParseOpenFiles(rawOpenFiles);
+		if (!string.IsNullOrWhiteSpace(history))
+		{
+			builder.AppendLine("Recent conversation:");
+			builder.AppendLine(history);
+			builder.AppendLine();
+		}
 
-        if (openFiles.Count == 1)
+        builder.AppendLine("User request:");
+        builder.AppendLine(request.Message);
+
+        if (request.Resources is not { Count: > 0 })
         {
-            var filePath = openFiles[0];
-            var code = await _code.ReadCodeAsync(
-                request.Workspace,
-                filePath,
-                1,
-                AutomaticReadLines,
-                cancellationToken);
+            builder.AppendLine();
+            builder.AppendLine("IDE context: none supplied by the client.");
 
-            return new AgentContext(BuildSingleFilePrompt(request.Message, filePath, code));
+            return new AgentContext(builder.ToString());
         }
 
-        return new AgentContext(BuildAmbiguousEditorPrompt(request.Message, rawOpenFiles));
+        builder.AppendLine();
+        builder.AppendLine("IDE context supplied by Rider:");
+
+        foreach (var resource in request.Resources.Take(MaximumResources))
+            await AppendResourceAsync(builder, request, resource, cancellationToken);
+
+        return new AgentContext(builder.ToString());
     }
 
-    private static bool NeedsEditorContext(string message)
+    private async Task AppendResourceAsync(
+        StringBuilder builder,
+        AgentRequest request,
+        AgentPromptResource resource,
+        CancellationToken cancellationToken)
     {
-        var text = message.ToLowerInvariant();
+        builder.AppendLine();
+        builder.AppendLine($"Resource: {resource.Name ?? resource.Uri}");
 
-        return text.Contains("этот код") ||
-               text.Contains("этот файл") ||
-               text.Contains("текущий код") ||
-               text.Contains("текущий файл") ||
-               text.Contains("здесь") ||
-               text.Contains("this code") ||
-               text.Contains("this file") ||
-               text.Contains("current file");
-    }
-
-    private static IReadOnlyList<string> TryParseOpenFiles(string raw)
-    {
-        try
+        if (!string.IsNullOrWhiteSpace(resource.Text))
         {
-            using var document = JsonDocument.Parse(raw);
-            var root = document.RootElement;
-
-            if (root.ValueKind == JsonValueKind.Array)
-                return ReadStringArray(root);
-
-            if (root.ValueKind == JsonValueKind.Object &&
-                root.TryGetProperty("openFiles", out var openFiles) &&
-                openFiles.ValueKind == JsonValueKind.Array)
-            {
-                return ReadStringArray(openFiles);
-            }
-        }
-        catch (JsonException)
-        {
-            // Rider may return plain text depending on MCP version.
+            AppendCode(builder, resource.Text);
+            return;
         }
 
-        return Array.Empty<string>();
+        if (!TryGetFilePath(resource.Uri, out var filePath))
+            return;
+
+        var code = await _code.ReadCodeAsync(
+            request.Workspace,
+            filePath,
+            1,
+            MaximumFileLines,
+            cancellationToken);
+
+        AppendCode(builder, code);
     }
 
-    private static IReadOnlyList<string> ReadStringArray(JsonElement array)
+    private static void AppendCode(StringBuilder builder, string code)
     {
-        var result = new List<string>();
-
-        foreach (var item in array.EnumerateArray())
-        {
-            if (item.ValueKind != JsonValueKind.String)
-                continue;
-
-            var path = item.GetString();
-
-            if (!string.IsNullOrWhiteSpace(path))
-                result.Add(path);
-        }
-
-        return result;
+        builder.AppendLine("<code>");
+        builder.AppendLine(code);
+        builder.AppendLine("</code>");
     }
 
-    private static string BuildSingleFilePrompt(string userMessage, string filePath, string code)
+    private static bool TryGetFilePath(string resourceUri, out string filePath)
     {
-        return $"""
-                User request:
-                {userMessage}
+        filePath = string.Empty;
 
-                The IDE has exactly one open file, so it is the editor-relative target of the request.
+        if (!Uri.TryCreate(resourceUri, UriKind.Absolute, out var uri) || !uri.IsFile)
+            return false;
 
-                File:
-                {filePath}
+        filePath = uri.LocalPath;
 
-                Actual code retrieved from Rider:
-                <code>
-                {code}
-                </code>
-
-                Base the answer on this code. Do not search for unrelated symbols unless the code itself requires it.
-                """;
-    }
-
-    private static string BuildAmbiguousEditorPrompt(string userMessage, string rawOpenFiles)
-    {
-        return $"""
-                User request:
-                {userMessage}
-
-                The user referred to editor-relative code, but the IDE did not provide one unambiguous active file.
-
-                Rider open-file information:
-                {rawOpenFiles}
-
-                Do not guess the file, class, domain, or project feature.
-                Do not perform speculative symbol searches.
-                Explain that the active code could not be determined unambiguously.
-                """;
+        return true;
     }
 }

@@ -26,16 +26,7 @@ public sealed class CodeAgentTools
         _maximumToolSteps = maximumToolSteps;
     }
 
-    [Description("Get the current Rider editor context, including the active file and other open files.")]
-    public Task<string> GetEditorContextAsync(CancellationToken cancellationToken)
-    {
-        return ExecuteToolAsync(
-            "get_editor_context",
-            "get_editor_context",
-            () => _code.GetOpenFilesAsync(_workspace, cancellationToken));
-    }
-
-    [Description("Find C# classes, methods, properties or fields in the current project by symbol name.")]
+	[Description("Find C# classes, methods, properties or fields in the current project by symbol name.")]
     public Task<string> SearchSymbolAsync(
         [Description("Symbol name or fragment, for example InventoryService or AddItem.")] string query,
         CancellationToken cancellationToken)

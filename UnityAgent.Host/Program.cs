@@ -6,12 +6,14 @@ using UnityAgent.Core.Code;
 using UnityAgent.Core.Context;
 using UnityAgent.Core.Diagnostics;
 using UnityAgent.Core.Ide;
+using UnityAgent.Core.Memory;
 using UnityAgent.Core.Runtime;
 using UnityAgent.Core.Workspace;
 using UnityAgent.Host.Acp;
 using UnityAgent.Host.Diagnostics;
 using UnityAgent.Host.Hosting;
 using UnityAgent.Infrastructure.Context;
+using UnityAgent.Infrastructure.Memory;
 using UnityAgent.Infrastructure.Models;
 using UnityAgent.Infrastructure.Rider;
 using UnityAgent.Infrastructure.Workspace;
@@ -73,6 +75,10 @@ builder.Services.AddSingleton<LmStudioModelResolver>();
 builder.Services.AddSingleton<IIdeBridge, RiderMcpBridge>();
 builder.Services.AddSingleton<ICodeIntelligence, RiderCodeIntelligence>();
 builder.Services.AddSingleton<IAgentRuntime, AgentFrameworkRuntime>();
+builder.Services.AddSingleton<IContextEngine, ContextEngine>();
+builder.Services.AddSingleton<ICodeModification, RiderCodeModification>();
+builder.Services.AddSingleton<ICodeVerification, RiderCodeVerification>();
+builder.Services.AddSingleton<ISessionMemory, InMemorySessionMemory>();
 
 if (acpMode)
 	builder.Services.AddHostedService<AcpAgentWorker>();

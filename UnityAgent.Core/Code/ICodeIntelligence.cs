@@ -4,9 +4,14 @@ namespace UnityAgent.Core.Code;
 
 public interface ICodeIntelligence
 {
-	Task<string> GetOpenFilesAsync(ProjectWorkspace workspace, CancellationToken cancellationToken);
+	Task<string> SearchFileAsync(
+		ProjectWorkspace workspace, string pattern, CancellationToken cancellationToken);
 
-	Task<string> SearchSymbolAsync(ProjectWorkspace workspace, string query, CancellationToken cancellationToken);
+	Task<string> SearchTextAsync(
+		ProjectWorkspace workspace, string text, CancellationToken cancellationToken);
+
+	Task<string> SearchSymbolAsync(
+		ProjectWorkspace workspace, string query, CancellationToken cancellationToken);
 
 	Task<string> ReadCodeAsync(
 		ProjectWorkspace workspace,

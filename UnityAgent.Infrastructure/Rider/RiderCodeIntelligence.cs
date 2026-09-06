@@ -16,9 +16,29 @@ public sealed class RiderCodeIntelligence : ICodeIntelligence
 		_ide = ide;
 	}
 
-	public Task<string> GetOpenFilesAsync(ProjectWorkspace workspace, CancellationToken cancellationToken)
+	public Task<string> SearchFileAsync(
+		ProjectWorkspace workspace, string pattern, CancellationToken cancellationToken)
 	{
-		return _ide.CallToolAsync(workspace, "get_all_open_file_paths", null, cancellationToken);
+		var arguments = new Dictionary<string, object?>
+		{
+			["q"] = pattern,
+			["includeExcluded"] = false,
+			["limit"] = 12
+		};
+
+		return _ide.CallToolAsync(workspace, "search_file", arguments, cancellationToken);
+	}
+
+	public Task<string> SearchTextAsync(
+		ProjectWorkspace workspace, string text, CancellationToken cancellationToken)
+	{
+		var arguments = new Dictionary<string, object?>
+		{
+			["q"] = text,
+			["limit"] = 12
+		};
+
+		return _ide.CallToolAsync(workspace, "search_text", arguments, cancellationToken);
 	}
 
 	public Task<string> SearchSymbolAsync(ProjectWorkspace workspace, string query, CancellationToken cancellationToken)
@@ -81,4 +101,26 @@ public sealed class RiderCodeIntelligence : ICodeIntelligence
 
         return _ide.CallToolAsync(workspace,"get_file_problems", arguments, cancellationToken);
     }
+
+	private async Task<string?> TryExecuteEditorToolAsync(
+		ProjectWorkspace workspace, string command, CancellationToken cancellationToken)
+	{
+		try
+		{
+			var arguments = new Dictionary<string, object?>
+			{
+				["command"] = command
+			};
+
+			var result = await _ide.CallToolAsync(workspace, "execute_tool", arguments, cancellationToken);
+
+			return string.IsNullOrWhiteSpace(result)
+				? null
+				: result.Trim();
+		}
+		catch (Exception)
+		{
+			return null;
+		}
+	}
 }

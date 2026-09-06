@@ -20,7 +20,9 @@ internal sealed class AcpAgentWorker : BackgroundService
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activePrompts = new();
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
-    public AcpAgentWorker(
+	private int _code = -32602;
+
+	public AcpAgentWorker(
         IAgentRuntime agent,
         IOptions<AgentSettings> settings,
         IHostApplicationLifetime applicationLifetime)
@@ -109,31 +111,37 @@ internal sealed class AcpAgentWorker : BackgroundService
         }
     }
 
-    private Task HandleInitializeAsync(JsonElement id, CancellationToken cancellationToken)
-    {
-        var result = new
-        {
-            protocolVersion = 1,
-            agentCapabilities = new
-            {
-                loadSession = false
-            }
-        };
+	private Task HandleInitializeAsync(JsonElement id, CancellationToken cancellationToken)
+	{
+		var result = new
+		{
+			protocolVersion = 1,
+			agentCapabilities = new
+			{
+				loadSession = false,
+				promptCapabilities = new
+				{
+					image = false,
+					audio = false,
+					embeddedContext = true
+				}
+			}
+		};
 
-        return SendResultAsync(id, result, cancellationToken);
-    }
+		return SendResultAsync(id, result, cancellationToken);
+	}
 
     private Task HandleNewSessionAsync(JsonElement id, JsonElement parameters, CancellationToken cancellationToken)
     {
         var cwd = parameters.GetProperty("cwd").GetString();
 
         if (string.IsNullOrWhiteSpace(cwd))
-            return SendErrorAsync(id, -32602, "session/new requires cwd.", cancellationToken);
+            return SendErrorAsync(id, _code, "session/new requires cwd.", cancellationToken);
 
         var rootPath = Path.GetFullPath(cwd);
 
         if (!Directory.Exists(rootPath))
-            return SendErrorAsync(id, -32602, $"Workspace does not exist: {rootPath}", cancellationToken);
+            return SendErrorAsync(id, _code, $"Workspace does not exist: {rootPath}", cancellationToken);
 
         var workspace = new ProjectWorkspace(rootPath, new DirectoryInfo(rootPath).Name);
         var sessionId = Guid.NewGuid().ToString("N");
@@ -180,10 +188,10 @@ internal sealed class AcpAgentWorker : BackgroundService
         var modeId = parameters.GetProperty("modeId").GetString();
 
         if (string.IsNullOrWhiteSpace(sessionId) || !_sessions.TryGetValue(sessionId, out var session))
-            return SendErrorAsync(id, -32602, "Unknown ACP session.", cancellationToken);
+            return SendErrorAsync(id, _code, "Unknown ACP session.", cancellationToken);
 
         if (!TryParseMode(modeId, out var mode))
-            return SendErrorAsync(id, -32602, $"Unknown agent mode: {modeId}", cancellationToken);
+            return SendErrorAsync(id, _code, $"Unknown agent mode: {modeId}", cancellationToken);
 
         session.Mode = mode;
 
@@ -195,12 +203,18 @@ internal sealed class AcpAgentWorker : BackgroundService
         var sessionId = parameters.GetProperty("sessionId").GetString();
 
         if (string.IsNullOrWhiteSpace(sessionId) || !_sessions.TryGetValue(sessionId, out var session))
-            return SendErrorAsync(id, -32602, "Unknown ACP session.", stoppingToken);
+            return SendErrorAsync(id, _code, "Unknown ACP session.", stoppingToken);
 
-        var message = ExtractTextPrompt(parameters);
+		var prompt = AcpPromptParser.Parse(parameters);
 
-        if (string.IsNullOrWhiteSpace(message))
-            return SendErrorAsync(id, -32602, "The prompt contains no text.", stoppingToken);
+		Console.Error.WriteLine(
+			$"[ACP PROMPT] textLength={prompt.Text.Length}, resources={prompt.Resources.Count}");
+
+		foreach (var resource in prompt.Resources)
+			Console.Error.WriteLine($"[ACP RESOURCE] {resource.Name ?? resource.Uri}");
+
+		if (string.IsNullOrWhiteSpace(prompt.Text) && prompt.Resources.Count == 0)
+			return SendErrorAsync(id, _code, "The prompt contains no supported content.", stoppingToken);
 
         var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
@@ -211,21 +225,26 @@ internal sealed class AcpAgentWorker : BackgroundService
             return SendErrorAsync(id, -32000, "This session already has an active prompt.", stoppingToken);
         }
 
-        _ = RunPromptAsync(id.Clone(), sessionId, session, message, cancellation);
+		_ = RunPromptAsync(id.Clone(), sessionId, session, prompt, cancellation);
 
         return Task.CompletedTask;
     }
 
-    private async Task RunPromptAsync(
-        JsonElement requestId,
-        string sessionId,
-        AcpSessionState session,
-        string message,
-        CancellationTokenSource cancellation)
+	private async Task RunPromptAsync(
+		JsonElement requestId,
+		string sessionId,
+		AcpSessionState session,
+		AcpPrompt prompt,
+		CancellationTokenSource cancellation)
     {
         try
         {
-            var request = new AgentRequest(message, session.Mode, session.Workspace, sessionId);
+			var request = new AgentRequest(
+				prompt.Text,
+				session.Mode,
+				session.Workspace,
+				sessionId,
+				prompt.Resources);
 
             await foreach (var agentEvent in _agent.RunAsync(request, cancellation.Token))
             {
@@ -289,26 +308,7 @@ internal sealed class AcpAgentWorker : BackgroundService
             cancellation.Cancel();
     }
 
-    private static string ExtractTextPrompt(JsonElement parameters)
-    {
-        if (!parameters.TryGetProperty("prompt", out var prompt))
-            return string.Empty;
-
-        var parts = new List<string>();
-
-        foreach (var block in prompt.EnumerateArray())
-        {
-            if (!block.TryGetProperty("type", out var type) || type.GetString() != "text")
-                continue;
-
-            if (block.TryGetProperty("text", out var text))
-                parts.Add(text.GetString() ?? string.Empty);
-        }
-
-        return string.Join(Environment.NewLine, parts);
-    }
-
-    private Task SendResultAsync(JsonElement id, object result, CancellationToken cancellationToken)
+	private Task SendResultAsync(JsonElement id, object result, CancellationToken cancellationToken)
     {
         return SendAsync(new
         {
